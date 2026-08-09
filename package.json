@@ -1,0 +1,8 @@
+{
+  "name": "ores-otel-log-nodejs-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test harness/*.mjs"
+  }
+}
