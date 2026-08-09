@@ -1,0 +1,15 @@
+{
+  "language": "nodejs",
+  "matrixVersion": "ores.otel.test-repository/v1",
+  "name": "ores-otel-log-nodejs-test",
+  "requireExactHeadChecks": true,
+  "requireNoMonkeyPatching": true,
+  "runtime": "Node.js 18/20/22/24, Bun, and Deno",
+  "sources": [
+    "ores-otel/ores.otel.log",
+    "ORESoftware/next-loggers.ts"
+  ],
+  "status": "seeded",
+  "testCommand": "npm ci && npm test",
+  "toolchain": "npm and runtime CLIs"
+}
