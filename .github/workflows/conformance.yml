@@ -15,20 +15,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve-heads:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.refs.outputs.matrix }}
+    steps:
+      - id: refs
+        name: Resolve current canonical and legacy main SHAs
+        shell: bash
+        run: |
+          set -euo pipefail
+          canonical_sha="$(git ls-remote https://github.com/ores-otel/ores.otel.log.git refs/heads/main | awk '{print $1}')"
+          legacy_sha="$(git ls-remote https://github.com/ORESoftware/next-loggers.ts.git refs/heads/main | awk '{print $1}')"
+          for sha in "${canonical_sha}" "${legacy_sha}"; do
+            [[ "${sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid source SHA: ${sha}" >&2; exit 1; }
+          done
+          matrix="$(jq -cn --arg canonical "${canonical_sha}" --arg legacy "${legacy_sha}" '{include:[{repository:"ores-otel/ores.otel.log",ref:$canonical,role:"canonical"},{repository:"ORESoftware/next-loggers.ts",ref:$legacy,role:"legacy"}]}')"
+          echo "matrix=${matrix}" >>"${GITHUB_OUTPUT}"
+
   native:
+    needs: resolve-heads
     name: nodejs / ${{ matrix.role }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - repository: ores-otel/ores.otel.log
-            ref: cbc38e069c1ed4e44eb010ff430b028397fa0520
-            role: canonical
-          - repository: ORESoftware/next-loggers.ts
-            ref: cbc38e069c1ed4e44eb010ff430b028397fa0520
-            role: legacy
+      matrix: ${{ fromJSON(needs.resolve-heads.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
         with:
