@@ -1,29 +1,15 @@
 {
-  "automatic_instrumentation": false,
-  "capabilities": [
-    "record-schema",
-    "api-manifest",
-    "context-isolation",
-    "otel-explicit",
-    "no-monkey-patching",
-    "supabase-client",
-    "lifecycle",
-    "concurrency",
-    "prometheus-cardinality",
-    "loki-correlation"
-  ],
-  "exact_heads": {
-    "canonical": "be37556eeeaa77c2fc57feda96239b69cca8e9ac",
-    "legacy": "be37556eeeaa77c2fc57feda96239b69cca8e9ac"
-  },
   "language": "nodejs",
-  "no_monkey_patching": true,
-  "repository": "ores-otel-test/ores-otel-log-nodejs-test",
-  "runtime": "Node.js, Bun, and Deno",
-  "schema_version": 1,
+  "matrixVersion": "ores.otel.test-repository/v1",
+  "name": "ores-otel-log-nodejs-test",
+  "requireExactHeadChecks": true,
+  "requireNoMonkeyPatching": true,
+  "runtime": "Node.js 18/20/22/24, Bun, and Deno",
   "sources": [
     "ores-otel/ores.otel.log",
     "ORESoftware/next-loggers.ts"
   ],
-  "test_command": "npm ci && npm test"
+  "status": "seeded",
+  "testCommand": "npm ci && npm test",
+  "toolchain": "npm and runtime CLIs"
 }
