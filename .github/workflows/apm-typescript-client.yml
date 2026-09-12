@@ -85,12 +85,23 @@ jobs:
           mkdir -p "$consumer"
           client_index="$GITHUB_WORKSPACE/.deps/clients/clients/typescript/src/index.ts"
           fixture="$GITHUB_WORKSPACE/.deps/interfaces/$(jq -er '.authority.fixture' apm-client.lock.json)"
+          python3 - "$fixture" "$consumer/fixture.ts" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+          pathlib.Path(sys.argv[2]).write_text(
+              'export const fixtureText = ' + json.dumps(source) + ' as const;\n',
+              encoding='utf-8',
+          )
+          PY
           cat > "$consumer/consumer.ts" <<EOF
-          import { readFileSync } from 'node:fs';
           import { Client } from '${client_index}';
           import type { ApmSnapshot } from '${client_index}';
+          import { fixtureText } from './fixture.ts';
 
-          const bytes = new TextEncoder().encode(readFileSync(process.env.APM_FIXTURE!, 'utf8'));
+          const bytes = new TextEncoder().encode(fixtureText);
           const client = new Client({ baseUrl: 'https://example.invalid', maxResponseBytes: 1024 * 1024 });
           const decoded = client.decodeApmSnapshot(bytes);
           if (!decoded.ok) throw new Error(decoded.error.code);
@@ -104,18 +115,19 @@ jobs:
           {
             "compilerOptions": {
               "target": "ES2022",
-              "module": "NodeNext",
-              "moduleResolution": "NodeNext",
+              "module": "ESNext",
+              "moduleResolution": "Bundler",
+              "lib": ["ES2022", "DOM"],
               "strict": true,
               "noEmit": true,
               "allowImportingTsExtensions": true,
               "skipLibCheck": false
             },
-            "include": ["consumer.ts", "$GITHUB_WORKSPACE/.deps/clients/clients/typescript/src/**/*.ts"]
+            "include": ["consumer.ts", "fixture.ts", "$GITHUB_WORKSPACE/.deps/clients/clients/typescript/src/**/*.ts"]
           }
           EOF
           "$RUNNER_TEMP/apm-ts-tools/node_modules/.bin/tsc" -p "$consumer/tsconfig.json"
-          APM_FIXTURE="$fixture" "$RUNNER_TEMP/apm-ts-tools/node_modules/.bin/tsx" "$consumer/consumer.ts"
+          "$RUNNER_TEMP/apm-ts-tools/node_modules/.bin/tsx" "$consumer/consumer.ts"
       - name: Prove source dependencies were not rewritten
         shell: bash
         run: |
