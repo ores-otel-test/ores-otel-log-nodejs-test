@@ -1,0 +1,43 @@
+name: Exact-head observability chain consumer
+
+on:
+  pull_request:
+    paths:
+      - 'harness/observability-chain-consumer.mjs'
+      - '.github/workflows/observability-chain-exact-head.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node-consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_LOGGERS_SHA: 1838474e85b0655080262cfa1135434f57545881
+    steps:
+      - name: Check out test harness
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install harness dependencies
+        run: npm ci
+      - name: Fetch exact next-loggers source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          git -C source remote add origin https://github.com/ORESoftware/next-loggers.ts.git
+          git -C source fetch --no-tags --depth=1 origin "$NEXT_LOGGERS_SHA"
+          test "$(git -C source rev-parse FETCH_HEAD)" = "$NEXT_LOGGERS_SHA"
+          git -C source checkout --detach "$NEXT_LOGGERS_SHA"
+      - name: Build exact logger source
+        working-directory: source
+        run: npm ci && npm run build
+      - name: Run independent consumer acceptance
+        env:
+          NEXT_LOGGERS_SOURCE: ${{ github.workspace }}/source
+        run: node --test harness/observability-chain-consumer.mjs
