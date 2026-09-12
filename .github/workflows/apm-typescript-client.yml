@@ -1,0 +1,135 @@
+name: APM TypeScript client canary
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/apm-typescript-client.yml"
+      - "apm-client.lock.json"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/apm-typescript-client.yml"
+      - "apm-client.lock.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  typescript-apm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact canary revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Read immutable dependency lock
+        id: lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          client_revision="$(jq -er '.client.revision' apm-client.lock.json)"
+          authority_revision="$(jq -er '.authority.revision' apm-client.lock.json)"
+          [[ "$client_revision" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$authority_revision" =~ ^[0-9a-f]{40}$ ]]
+          printf 'client_revision=%s\n' "$client_revision" >> "$GITHUB_OUTPUT"
+          printf 'authority_revision=%s\n' "$authority_revision" >> "$GITHUB_OUTPUT"
+      - name: Check out exact client source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ores-otel/ores-otel-clients
+          ref: ${{ steps.lock.outputs.client_revision }}
+          path: .deps/clients
+          persist-credentials: false
+      - name: Check out exact APM peer authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ores-otel/ores-interfaces
+          ref: ${{ steps.lock.outputs.authority_revision }}
+          path: .deps/interfaces
+          persist-credentials: false
+      - name: Verify both authored peer authorities exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          typespec=".deps/interfaces/$(jq -er '.authority.typespec' apm-client.lock.json)"
+          schema=".deps/interfaces/$(jq -er '.authority.jsonSchema' apm-client.lock.json)"
+          fixture=".deps/interfaces/$(jq -er '.authority.fixture' apm-client.lock.json)"
+          test -s "$typespec"
+          test -s "$schema"
+          test -s "$fixture"
+          grep -F 'namespace OresOtel.Apm.V1' "$typespec"
+          jq -e '."$schema" == "https://json-schema.org/draft/2020-12/schema" and (."$defs".ApmSnapshot != null)' "$schema" >/dev/null
+      - name: Set up pinned Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6.0.0
+        with:
+          node-version: 22.16.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install exact consumer compiler tools in temporary directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/apm-ts-tools"
+          mkdir -p "$tools"
+          cd "$tools"
+          npm init -y >/dev/null
+          npm install --ignore-scripts --no-audit --no-fund --save-exact typescript@5.9.3 tsx@4.20.5
+      - name: Compile and execute independent TypeScript consumer
+        shell: bash
+        run: |
+          set -euo pipefail
+          consumer="$RUNNER_TEMP/apm-ts-consumer"
+          mkdir -p "$consumer"
+          client_index="$GITHUB_WORKSPACE/.deps/clients/clients/typescript/src/index.ts"
+          fixture="$GITHUB_WORKSPACE/.deps/interfaces/$(jq -er '.authority.fixture' apm-client.lock.json)"
+          python3 - "$fixture" "$consumer/fixture.ts" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          source = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+          pathlib.Path(sys.argv[2]).write_text(
+              'export const fixtureText = ' + json.dumps(source) + ' as const;\n',
+              encoding='utf-8',
+          )
+          PY
+          cat > "$consumer/consumer.ts" <<EOF
+          import { Client } from '${client_index}';
+          import type { ApmSnapshot } from '${client_index}';
+          import { fixtureText } from './fixture.ts';
+
+          const bytes = new TextEncoder().encode(fixtureText);
+          const client = new Client({ baseUrl: 'https://example.invalid', maxResponseBytes: 1024 * 1024 });
+          const decoded = client.decodeApmSnapshot(bytes);
+          if (!decoded.ok) throw new Error(decoded.error.code);
+          const snapshot: ApmSnapshot = decoded.value;
+          if (snapshot.schema_version !== 1) throw new Error('schema version drift');
+          if (snapshot.observed_at_unix_nano !== '1789150000000000000') throw new Error('int64 wire drift');
+          if (!Object.isFrozen(snapshot) || !Object.isFrozen(snapshot.process)) throw new Error('snapshot must be deeply frozen');
+          if (snapshot.filesystems.length === 0 || snapshot.service.latency_seconds.buckets.length === 0) throw new Error('APM data missing');
+          EOF
+          cat > "$consumer/tsconfig.json" <<EOF
+          {
+            "compilerOptions": {
+              "target": "ES2022",
+              "module": "ESNext",
+              "moduleResolution": "Bundler",
+              "lib": ["ES2022", "DOM"],
+              "strict": true,
+              "noEmit": true,
+              "allowImportingTsExtensions": true,
+              "skipLibCheck": false
+            },
+            "include": ["consumer.ts", "fixture.ts", "$GITHUB_WORKSPACE/.deps/clients/clients/typescript/src/**/*.ts"]
+          }
+          EOF
+          "$RUNNER_TEMP/apm-ts-tools/node_modules/.bin/tsc" -p "$consumer/tsconfig.json"
+          "$RUNNER_TEMP/apm-ts-tools/node_modules/.bin/tsx" "$consumer/consumer.ts"
+      - name: Prove source dependencies were not rewritten
+        shell: bash
+        run: |
+          test -z "$(git -C .deps/clients status --porcelain=v1 --untracked-files=no)"
+          test -z "$(git -C .deps/interfaces status --porcelain=v1 --untracked-files=no)"
