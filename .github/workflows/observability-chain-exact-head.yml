@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      NEXT_LOGGERS_SHA: 9bf94e8a183612d3c1f703735a4cd3819594344a
+      NEXT_LOGGERS_SHA: 15c2c9291242629d574bd89134083c85e79514fa
     steps:
       - name: Check out test harness
         uses: actions/checkout@v4
