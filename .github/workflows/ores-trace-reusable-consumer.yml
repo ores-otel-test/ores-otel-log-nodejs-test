@@ -1,0 +1,58 @@
+# External, source-free consumer proof for the public ORES trace checker integration.
+# This workflow pins the exact #120 candidate SHA and does not copy private code.
+name: ORES trace reusable consumer exact-head
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/ores-trace-reusable-consumer.yml'
+      - 'trace-contract-positive/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reusable-positive:
+    uses: ores-otel/ores.otel.log/.github/workflows/ores-trace-contract-reusable.yml@4dec880d52589e536ac60cb097e267592b4eeb0b
+    permissions:
+      contents: read
+
+  negative-control:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact consumer PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Compile the pinned checker without warnings
+        shell: bash
+        env:
+          CHECKER_SHA: 4dec880d52589e536ac60cb097e267592b4eeb0b
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            "https://raw.githubusercontent.com/ores-otel/ores.otel.log/${CHECKER_SHA}/.github/ores-trace-contract.rs" \
+            --output "$RUNNER_TEMP/ores-trace-contract.rs"
+          rustc --edition=2021 -D warnings -O \
+            -o "$RUNNER_TEMP/ores-trace-contract" "$RUNNER_TEMP/ores-trace-contract.rs"
+
+      - name: Prove valid admission and invalid marker rejection
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/trace-positive/src" "$RUNNER_TEMP/trace-negative/src"
+          printf '%s\n' 'logger.addTraceId("ores-trace-ABCDEFGHIJKLMNOPQRSTU");' \
+            > "$RUNNER_TEMP/trace-positive/src/valid.ts"
+          printf '%s\n' 'logger.addTraceId("ores-trace-short");' \
+            > "$RUNNER_TEMP/trace-negative/src/invalid.ts"
+          "$RUNNER_TEMP/ores-trace-contract" "$RUNNER_TEMP/trace-positive"
+          if "$RUNNER_TEMP/ores-trace-contract" "$RUNNER_TEMP/trace-negative" \
+            > "$RUNNER_TEMP/trace-negative.log" 2>&1; then
+            echo "FAIL: invalid trace marker was accepted" >&2
+            exit 1
+          fi
+          grep -F 'ores-trace-short' "$RUNNER_TEMP/trace-negative.log"
+          grep -F 'violation(s)' "$RUNNER_TEMP/trace-negative.log"
+          echo "PASS: invalid marker rejected for the expected semantic reason"
